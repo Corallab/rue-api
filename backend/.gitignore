@@ -4,11 +4,10 @@
 __pycache__/
 
 # Virtual environment
-venv/
 .env/
+venv/
 
 # Configuration and secrets files
-config.py
 *.env
 
 # IDEs and editors
