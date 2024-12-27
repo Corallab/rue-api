@@ -47,4 +47,8 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          ssh -i $SSH_PRIVATE_KEY $SERVER_USER@$SERVER_HOST 'bash -s' < deploy.sh
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh -i ~/.ssh/id_rsa $SERVER_USER@$SERVER_HOST 'bash -s' < deploy.sh
+
