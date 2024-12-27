@@ -47,8 +47,18 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
+          # Create .ssh directory and set permissions
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Add SSH private key to the instance
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          
+          # Add server host key to known_hosts to prevent "Host key verification failed" error
+          ssh-keyscan -H $SERVER_HOST >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          # Run the deployment script
           ssh -i ~/.ssh/id_rsa $SERVER_USER@$SERVER_HOST 'bash -s' < deploy.sh
 
