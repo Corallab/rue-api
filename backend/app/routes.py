@@ -2,10 +2,8 @@ import re
 import requests
 from bs4 import BeautifulSoup
 from flask import Blueprint, request, jsonify, make_response
-from app.utils import parse_or_strip, fetch_whois_data
-from app.default_categories import get_default_categories
-from app.adverse_media_service import check_adverse_media
 
+# Sample valid API keys for testing
 VALID_KEYS = {
     "staging_api_key_12345abcde67890xyz": "staging_secret_key_abcd1234xyz7890qwe",
     "staging_api_key_zxcvbnm09876lkjhg": "staging_secret_key_qwerty12345asdfghjkl"
@@ -71,7 +69,10 @@ main_bp = Blueprint('main', __name__)
 
 @main_bp.before_request
 def require_api_keys():
-    """Validate API keys for every request."""
+    """Validate API keys for every request except health check route."""
+    if request.endpoint == 'main.health_check':  # Skip API key validation for health check route
+        return None
+
     if request.method == "OPTIONS":
         return make_response()
     api_key = request.headers.get("X-API-Key")
@@ -90,6 +91,9 @@ def add_cors_headers(response):
 @main_bp.route('/api/scrape_metadata', methods=['POST', 'OPTIONS'])
 def scrape_metadata():
     from app.ai_category_service import categorize_and_summarize, calculate_high_risk_similarity
+    from app.utils import parse_or_strip, fetch_whois_data
+    from app.default_categories import get_default_categories
+    from app.adverse_media_service import check_adverse_media
 
     if request.method == "OPTIONS":
         return "", 204
@@ -147,4 +151,14 @@ def scrape_metadata():
         return jsonify(filtered_response), 200
     except Exception as e:
         print(f"Error processing request: {e}")  # Debugging log
+        return jsonify({"error": str(e)}), 500
+
+
+# Health Check Route
+@main_bp.route('/api/health-check', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    try:
+        return jsonify({"status": "healthy"}), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
