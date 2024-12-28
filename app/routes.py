@@ -144,3 +144,68 @@ def health_check():
         return jsonify({"status": "healthy"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@main_bp.route('/api/scrape_metadata', methods=['POST', 'OPTIONS'])
+def scrape_metadata():
+    from app.ai_category_service import categorize_and_summarize, calculate_high_risk_similarity
+    from app.utils import parse_or_strip, fetch_whois_data
+    from app.default_categories import get_default_categories
+    from app.adverse_media_service import check_adverse_media
+
+    if request.method == "OPTIONS":
+        return "", 204
+
+    data = request.get_json() or {}
+    input_string = data.get("input_string", "").strip()
+    custom_categories = data.get("custom_categories", [])
+    custom_high_risk_categories = data.get("custom_high_risk_categories", [])
+    include_whois = data.get("include_whois", False)
+    include_adverse_media = data.get("include_adverse_media", True)
+    selected_fields = data.get("selected_fields", {})
+
+    if not input_string:
+        return jsonify({"error": "input_string is required"}), 400
+
+    input_type, domain = parse_or_strip(input_string)
+
+    try:
+        # Step 1: Scrape website metadata
+        metadata = scrape_website_metadata(domain)
+        homepage_content = metadata.get("description", "")
+
+        # Step 2: Categorize and summarize
+        ai_response = categorize_and_summarize(domain, metadata, homepage_content, custom_categories)
+
+        # Step 3: Calculate high-risk similarity
+        high_risk_categories = custom_high_risk_categories or get_default_categories()
+        high_risk_similarity_score = calculate_high_risk_similarity(ai_response["category"], high_risk_categories)
+        ai_response["high_risk_similarity_score"] = high_risk_similarity_score
+
+        # Step 4: Prepare full response
+        response = {
+            "type": input_type,
+            "domain": domain,
+            "metadata": metadata,
+            "ai_response": ai_response,
+        }
+
+        if include_whois:
+            response["whois_data"] = fetch_whois_data(domain)
+
+        if include_adverse_media:
+            business_name = domain.split('.')[0]
+            adverse_media_result = check_adverse_media(business_name, domain)
+            response["adverse_media"] = adverse_media_result
+
+        # Step 5: Filter response based on selected fields
+        def filter_fields(data, allowed_fields):
+            if isinstance(data, dict):
+                return {key: filter_fields(value, allowed_fields) for key, value in data.items() if allowed_fields.get(key, True)}
+            return data
+
+        filtered_response = filter_fields(response, selected_fields)
+
+        return jsonify(filtered_response), 200
+    except Exception as e:
+        print(f"Error processing request: {e}")  # Debugging log
+        return jsonify({"error": str(e)}), 500
