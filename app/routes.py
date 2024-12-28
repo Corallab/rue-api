@@ -2,6 +2,13 @@ import re
 import requests
 from bs4 import BeautifulSoup
 from flask import Blueprint, request, jsonify, make_response
+import openai
+import os
+from dotenv import load_dotenv
+
+# Load environment variables for OpenAI API key
+load_dotenv()
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
 # Sample valid API keys for testing
 VALID_KEYS = {
@@ -65,6 +72,7 @@ def scrape_website_metadata(domain):
 
     raise ValueError(f"Could not fetch metadata for domain: {domain}")
 
+
 main_bp = Blueprint('main', __name__)
 
 @main_bp.before_request
@@ -88,76 +96,50 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
-@main_bp.route('/api/scrape_metadata', methods=['POST', 'OPTIONS'])
-def scrape_metadata():
-    from app.ai_category_service import categorize_and_summarize, calculate_high_risk_similarity
-    from app.utils import parse_or_strip, fetch_whois_data
-    from app.default_categories import get_default_categories
-    from app.adverse_media_service import check_adverse_media
-
+@main_bp.route('/api/generate_sop', methods=['POST', 'OPTIONS'])
+def generate_sop():
+    """Generate a formatted SOP document using OpenAI API based on user input."""
     if request.method == "OPTIONS":
         return "", 204
 
     data = request.get_json() or {}
-    input_string = data.get("input_string", "").strip()
-    custom_categories = data.get("custom_categories", [])
-    custom_high_risk_categories = data.get("custom_high_risk_categories", [])
-    include_whois = data.get("include_whois", False)
-    include_adverse_media = data.get("include_adverse_media", True)
-    selected_fields = data.get("selected_fields", {})
+    prompt = data.get("prompt", "").strip()  # User input (SOP request)
 
-    if not input_string:
-        return jsonify({"error": "input_string is required"}), 400
-
-    input_type, domain = parse_or_strip(input_string)
+    if not prompt:
+        return jsonify({"error": "The prompt is required."}), 400
 
     try:
-        # Step 1: Scrape website metadata
-        metadata = scrape_website_metadata(domain)
-        homepage_content = metadata.get("description", "")
+       # Updated SOP generation prompt to ask OpenAI for Markdown-formatted output
+        sop_response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an expert in generating well-structured SOPs in Markdown format."},
+                {"role": "user", "content": f"Create a detailed and formatted SOP in Markdown based on the following prompt. Use appropriate Markdown syntax for headers (## for subheadings), bullet points, numbering, and bold. Use /n for line breaks so I can parse the response: ${prompt}"}
+            ],
+            max_tokens=1500,
+            temperature=0.7
+        )
 
-        # Step 2: Categorize and summarize
-        ai_response = categorize_and_summarize(domain, metadata, homepage_content, custom_categories)
+        # Extract the generated SOP document from the response
+        sop_document = sop_response.choices[0].message['content']
 
-        # Step 3: Calculate high-risk similarity
-        high_risk_categories = custom_high_risk_categories or get_default_categories()
-        high_risk_similarity_score = calculate_high_risk_similarity(ai_response["category"], high_risk_categories)
-        ai_response["high_risk_similarity_score"] = high_risk_similarity_score
+        return jsonify({
+            "status": "success",
+            "sop_document": sop_document
+        }), 200
 
-        # Step 4: Prepare full response
-        response = {
-            "type": input_type,
-            "domain": domain,
-            "metadata": metadata,
-            "ai_response": ai_response,
-        }
-
-        if include_whois:
-            response["whois_data"] = fetch_whois_data(domain)
-
-        if include_adverse_media:
-            business_name = domain.split('.')[0]
-            adverse_media_result = check_adverse_media(business_name, domain)
-            response["adverse_media"] = adverse_media_result
-
-        # Step 5: Filter response based on selected fields
-        def filter_fields(data, allowed_fields):
-            if isinstance(data, dict):
-                return {key: filter_fields(value, allowed_fields) for key, value in data.items() if allowed_fields.get(key, True)}
-            return data
-
-        filtered_response = filter_fields(response, selected_fields)
-
-        return jsonify(filtered_response), 200
+    except openai.Error as e:
+        # Catch OpenAI specific errors and return a message
+        return jsonify({"error": f"OpenAI API call failed: {str(e)}"}), 500
     except Exception as e:
-        print(f"Error processing request: {e}")  # Debugging log
-        return jsonify({"error": str(e)}), 500
+        # Catch any other general errors
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 
-# Health Check Route
+# Health Check Route for your API
 @main_bp.route('/api/health-check', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint to ensure the API is operational."""
     try:
         return jsonify({"status": "healthy"}), 200
     except Exception as e:
